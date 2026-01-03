@@ -44,11 +44,22 @@ input group "=== Backtest Control ==="
 input bool   InpTradeOncePerBar = true;                        // Trade Once Per Bar
 input bool   InpEnableOptimization = false;                    // Enable Optimization
 
+input group "=== Exact Entry Time ==="
+input bool   InpUseExactTime = false;                          // Use Exact Entry Time
+input int    InpEntryYear = 2025;                              // Entry Year
+input int    InpEntryMonth = 1;                                // Entry Month (1-12)
+input int    InpEntryDay = 1;                                  // Entry Day (1-31)
+input int    InpEntryHour = 9;                                 // Entry Hour (0-23)
+input int    InpEntryMinute = 30;                              // Entry Minute (0-59)
+input int    InpEntrySecond = 0;                               // Entry Second (0-59)
+
 //--- Global Variables
 CTrade trade;
 CBacktesterRisk riskCalc;
 datetime lastBarTime = 0;
 bool orderPlaced = false;
+datetime exactEntryTime = 0;
+bool exactTimeReached = false;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -66,6 +77,28 @@ int OnInit()
    
    //--- Validate inputs
    if(InpRiskPercent <= 0 || InpRiskPercent > 100)
+   //--- Build exact entry time if enabled
+   if(InpUseExactTime)
+   {
+      MqlDateTime dt;
+      dt.year = InpEntryYear;
+      dt.mon = InpEntryMonth;
+      dt.day = InpEntryDay;
+      dt.hour = InpEntryHour;
+      dt.min = InpEntryMinute;
+      dt.sec = InpEntrySecond;
+      
+      exactEntryTime = StructToTime(dt);
+      
+      if(exactEntryTime <= 0)
+      {
+         Print("Error: Invalid entry date/time specified");
+         return INIT_PARAMETERS_INCORRECT;
+      }
+      
+      Print("Exact entry time set to: ", TimeToString(exactEntryTime, TIME_DATE|TIME_SECONDS));
+   }
+   
    {
       Print("Error: Risk percent must be between 0 and 100");
       return INIT_PARAMETERS_INCORRECT;
@@ -76,18 +109,41 @@ int OnInit()
       Print("Error: Starting balance must be greater than 0");
       return INIT_PARAMETERS_INCORRECT;
    }
-   
-   Print("Backtester-EA initialized successfully");
-   Print("Symbol: ", symbol);
-   Print("Starting Balance: ", InpStartingBalance);
-   Print("Risk per trade: ", InpRiskPercent, "%");
-   
-   return INIT_SUCCEEDED;
-}
-
-//+------------------------------------------------------------------+
-//| Expert deinitialization function                                 |
-//+------------------------------------------------------------------+
+   If using exact entry time, check if we've reached it
+   if(InpUseExactTime)
+   {
+      datetime currentTime = TimeCurrent();
+      
+      // Skip if exact time not reached yet
+      if(!exactTimeReached && currentTime < exactEntryTime)
+         return;
+      
+      // Mark as reached when time matches or passes
+      if(!exactTimeReached && currentTime >= exactEntryTime)
+      {
+         exactTimeReached = true;
+         Print("Exact entry time reached: ", TimeToString(currentTime, TIME_DATE|TIME_SECONDS));
+      }
+      
+      // Skip if we already placed order after reaching exact time
+      if(exactTimeReached && orderPlaced)
+         return;
+   }
+   else
+   {
+      //--- Check if we should trade once per bar (only when not using exact time)
+      if(InpTradeOncePerBar)
+      {
+         datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+         if(currentBarTime == lastBarTime)
+            return;
+         lastBarTime = currentBarTime;
+      }
+      
+      //--- Skip if order already placed (for single-trade mode)
+      if(orderPlaced)
+         return;
+   }--------------------------------------------------------+
 void OnDeinit(const int reason)
 {
    Print("Backtester-EA stopped. Reason: ", reason);
@@ -169,7 +225,17 @@ void OnTick()
    
    if(result)
    {
-      Print("Order placed successfully. Lot size: ", lotSize, " SL: ", stopLoss, " TP: ", takeProfit);
+      datetime entryTime = TimeCurrent();
+      Print("========================================");
+      Print("Order placed successfully!");
+      Print("Entry Time: ", TimeToString(entryTime, TIME_DATE|TIME_SECONDS));
+      Print("Symbol: ", symbol);
+      Print("Order Type: ", EnumToString(InpOrderType));
+      Print("Lot Size: ", lotSize);
+      Print("Entry Price: ", (entryPrice > 0 ? entryPrice : (InpOrderType == ORDER_MARKET_BUY ? ask : bid)));
+      Print("Stop Loss: ", stopLoss);
+      Print("Take Profit: ", takeProfit);
+      Print("========================================");
       orderPlaced = true;
    }
    else

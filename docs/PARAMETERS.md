@@ -82,11 +82,49 @@ Comment attached to each trade.
 Controls trade frequency.
 - **true**: Only one trade per bar (recommended for backtesting)
 - **false**: Trade on every tick (may place multiple orders)
+- Ignored when UseExactTime is enabled
 
 ### EnableOptimization
 Flag for optimization mode.
 - Set parameters you want to optimize in Strategy Tester
 - Use "Optimization" tab to define ranges
+
+## Exact Entry Time
+
+### UseExactTime
+Enable precise entry timing down to the second.
+- **false**: Use standard entry logic (per bar or per tick)
+- **true**: Enter order at exact date/time specified below
+- When enabled, overrides TradeOncePerBar setting
+
+### EntryYear
+Year for exact entry (e.g., 2025).
+
+### EntryMonth
+Month for exact entry (1-12).
+
+### EntryDay
+Day for exact entry (1-31).
+
+### EntryHour
+Hour for exact entry (0-23, 24-hour format).
+
+### EntryMinute
+Minute for exact entry (0-59).
+
+### EntrySecond
+Second for exact entry (0-59).
+
+**Example**: To enter at January 15, 2025 at 9:30:15 AM:
+```
+UseExactTime: true
+EntryYear: 2025
+EntryMonth: 1
+EntryDay: 15
+EntryHour: 9
+EntryMinute: 30
+EntrySecond: 15
+```
 
 ## Risk Calculation Examples
 
@@ -119,6 +157,20 @@ FixedLotSize: 0.1
 Stop Loss: 50 points
 
 Lot Size = 0.1 (fixed, regardless of risk %)
+```
+
+### Example 4: Exact Time Entry
+```
+UseExactTime: true
+EntryYear: 2025
+EntryMonth: 3
+EntryDay: 15
+EntryHour: 14
+EntryMinute: 30
+EntrySecond: 0
+
+Order will be placed at: 2025.03.15 14:30:00
+Perfect for tracking specific market events or news releases
 ```
 
 ## Optimization Tips

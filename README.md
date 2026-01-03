@@ -5,6 +5,7 @@ MetaTrader 5 Expert Advisor for precise backtesting with configurable order entr
 ## Features
 
 - **Configurable Order Entry**: Set order type, instrument, entry price, stop loss, and take profit
+- **Exact Time Entry**: Enter trades at specific date/time down to the second for tracking specific market events
 - **Risk Management**: Define risk as percentage of account balance
 - **Flexible Balance**: Set starting account balance for backtesting
 - **Any Timeframe**: Works on all MT5 timeframes (M1, M5, H1, D1, etc.)
@@ -33,6 +34,10 @@ MetaTrader 5 Expert Advisor for precise backtesting with configurable order entr
 - **Symbol**: Trading instrument (auto-detects current chart symbol)
 - **MagicNumber**: Unique identifier for EA trades
 - **EnableOptimization**: Enable/disable parameter optimization
+
+### Exact Timing
+- **UseExactTime**: Enable precise entry at specific date/time
+- **EntryYear/Month/Day/Hour/Minute/Second**: Exact entry timestamp
 
 ## Usage
 
