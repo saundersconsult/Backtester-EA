@@ -150,12 +150,22 @@ void OnTick()
       if(!exactTimeReached && currentTime >= exactEntryTime)
       {
          exactTimeReached = true;
-         Print("Exact entry time reached: ", TimeToString(currentTime, TIME_DATE|TIME_SECONDS));
+         Print(">>> EXACT TIME REACHED: ", TimeToString(currentTime, TIME_DATE|TIME_SECONDS));
+         Print(">>> Proceeding to place order...");
       }
       
       // Skip if we already placed order after reaching exact time
       if(exactTimeReached && orderPlaced)
+      {
          return;
+      }
+      
+      if(!exactTimeReached)
+      {
+         Print("DEBUG: Waiting for exact time. Current: ", TimeToString(currentTime, TIME_DATE|TIME_SECONDS), 
+               " Target: ", TimeToString(exactEntryTime, TIME_DATE|TIME_SECONDS));
+         return;
+      }
    }
    else
    {
@@ -170,8 +180,14 @@ void OnTick()
       
       //--- Skip if order already placed (for single-trade mode)
       if(orderPlaced)
+   
+   Print(">>> Current Prices - Bid: ", bid, " Ask: ", ask);
+   Print(">>> Entry Price: ", entryPrice);
+   Print(">>> Signal Direction: ", (InpSignalDirection == SIGNAL_BUY ? "BUY" : "SELL"));
          return;
    }
+   
+   Print(">>> Preparing order placement...");
    
    //--- Get symbol info
    string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
@@ -216,22 +232,24 @@ void OnTick()
    if(takeProfit > 0)
       takeProfit = NormalizeDouble(takeProfit, digits);
    
-   //--- Determine order type based on signal direction and current price
-   bool result = false;
-   string orderTypeStr = "";
+   Print(">>> Determining order type...");
    
    if(InpSignalDirection == SIGNAL_BUY)
    {
       // Buy signal: use Limit if entry below current price, Stop if above
       if(entryPrice < ask)
       {
-         result = trade.BuyLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
          orderTypeStr = "Buy Limit";
+         Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") < Ask (", ask, ")");
+         Print(">>> Lot: ", lotSize, " SL: ", stopLoss, " TP: ", takeProfit);
+         result = trade.BuyLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
       }
       else
       {
-         result = trade.BuyStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
          orderTypeStr = "Buy Stop";
+         Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") >= Ask (", ask, ")");
+         Print(">>> Lot: ", lotSize, " SL: ", stopLoss, " TP: ", takeProfit);
+         result = trade.BuyStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
       }
    }
    else // SIGNAL_SELL
@@ -239,10 +257,26 @@ void OnTick()
       // Sell signal: use Limit if entry above current price, Stop if below
       if(entryPrice > bid)
       {
-         result = trade.SellLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
          orderTypeStr = "Sell Limit";
+         Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") > Bid (", bid, ")");
+         Print(">>> Lot: ", lotSize, " SL: ", stopLoss, " TP: ", takeProfit);
+         result = trade.SellLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
       }
       else
+      {
+         orderTypeStr = "Sell Stop";
+         Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") <= Bid (", bid, ")");
+         Print(">>> Lot: ", lotSize, " SL: ", stopLoss, " TP: ", takeProfit);
+         result = trade.SellStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
+      }
+   }
+   
+   Print(">>> Order placement result: ", (result ? "SUCCESS" : "FAILED"));
+   if(!result)
+   {
+      Print(">>> Error code: ", GetLastError());
+      Print(">>> Return code: ", trade.ResultRetcode());
+      Print(">>> Description: ", trade.ResultRetcodeDescription());lse
       {
          result = trade.SellStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
          orderTypeStr = "Sell Stop";
