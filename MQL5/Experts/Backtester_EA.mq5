@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Backtester-EA"
 #property link      ""
-#property version   "1.03"
-#property description "Signal validator EA with exact entry time, timezone support, and absolute price levels"
+#property version   "1.04"
+#property description "Signal validator EA with UTC entry time, automatic broker TZ detection, and absolute price levels"
 
 #include <Trade\Trade.mqh>
 #include <BacktesterRisk.mqh>
@@ -42,13 +42,12 @@ input bool   InpEnableOptimization = false;                    // Enable Optimiz
 
 input group "=== Exact Entry Time ==="
 input bool   InpUseExactTime = false;                          // Use Exact Entry Time
-input int    InpEntryYear = 2025;                              // Entry Year
-input int    InpEntryMonth = 1;                                // Entry Month (1-12)
-input int    InpEntryDay = 1;                                  // Entry Day (1-31)
-input int    InpEntryHour = 9;                                 // Entry Hour (0-23)
-input int    InpEntryMinute = 30;                              // Entry Minute (0-59)
-input int    InpEntrySecond = 0;                               // Entry Second (0-59)
-input double InpTimezoneOffset = 0.0;                          // Timezone Offset from Broker (hours, e.g., -5 for EST)
+input int    InpEntryYear = 2025;                              // Entry Year (UTC)
+input int    InpEntryMonth = 1;                                // Entry Month (1-12, UTC)
+input int    InpEntryDay = 1;                                  // Entry Day (1-31, UTC)
+input int    InpEntryHour = 9;                                 // Entry Hour UTC (0-23)
+input int    InpEntryMinute = 30;                              // Entry Minute UTC (0-59)
+input int    InpEntrySecond = 0;                               // Entry Second UTC (0-59)
 
 //--- Global Variables
 CTrade trade;
@@ -57,6 +56,7 @@ datetime lastBarTime = 0;
 bool orderPlaced = false;
 datetime exactEntryTime = 0;
 bool exactTimeReached = false;
+int brokerUTCOffsetSeconds = 0;  // Broker's UTC offset in seconds
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -67,6 +67,14 @@ int OnInit()
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFilling(ORDER_FILLING_FOK);
+   
+   //--- Detect broker's UTC offset
+   datetime serverTime = TimeCurrent();   // Server time in broker timezone
+   datetime gmtTime = TimeGMT();          // GMT/UTC time
+   brokerUTCOffsetSeconds = (int)(serverTime - gmtTime);
+   
+   double brokerUTCOffset = brokerUTCOffsetSeconds / 3600.0;
+   Print("Broker UTC offset: ", brokerUTCOffset, " hours");
    
    //--- Initialize risk calculator
    string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
@@ -94,31 +102,29 @@ int OnInit()
    //--- Build exact entry time if enabled
    if(InpUseExactTime)
    {
-      MqlDateTime dt;
-      dt.year = InpEntryYear;
-      dt.mon = InpEntryMonth;
-      dt.day = InpEntryDay;
-      dt.hour = InpEntryHour;
-      dt.min = InpEntryMinute;
-      dt.sec = InpEntrySecond;
+      //--- Create UTC time from inputs
+      MqlDateTime dtUTC;
+      dtUTC.year = InpEntryYear;
+      dtUTC.mon = InpEntryMonth;
+      dtUTC.day = InpEntryDay;
+      dtUTC.hour = InpEntryHour;
+      dtUTC.min = InpEntryMinute;
+      dtUTC.sec = InpEntrySecond;
       
-      exactEntryTime = StructToTime(dt);
+      datetime utcTime = StructToTime(dtUTC);
       
-      if(exactEntryTime <= 0)
+      if(utcTime <= 0)
       {
          Print("Error: Invalid entry date/time specified");
          return INIT_PARAMETERS_INCORRECT;
       }
       
-      //--- Apply timezone offset (convert from signal timezone to broker timezone)
-      // Negative offset means signal timezone is behind broker (e.g., -5 for EST when broker is UTC)
-      // Positive offset means signal timezone is ahead of broker
-      int offsetSeconds = (int)(InpTimezoneOffset * 3600);
-      exactEntryTime -= offsetSeconds;
+      //--- Convert UTC to broker's local time
+      exactEntryTime = utcTime + brokerUTCOffsetSeconds;
       
-      Print("Signal time entered: ", TimeToString(StructToTime(dt), TIME_DATE|TIME_SECONDS));
-      Print("Timezone offset: ", InpTimezoneOffset, " hours");
-      Print("Exact entry time (broker timezone): ", TimeToString(exactEntryTime, TIME_DATE|TIME_SECONDS));
+      Print("Entry time specified (UTC): ", TimeToString(utcTime, TIME_DATE|TIME_SECONDS));
+      Print("Broker UTC offset: ", (brokerUTCOffsetSeconds / 3600.0), " hours");
+      Print("Exact entry time (broker local): ", TimeToString(exactEntryTime, TIME_DATE|TIME_SECONDS));
    }
    
    Print("Backtester-EA initialized successfully");
