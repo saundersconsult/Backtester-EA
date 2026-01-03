@@ -13,18 +13,14 @@
 
 //--- Input Parameters
 input group "=== Order Settings ==="
-enum ENUM_ORDER_TYPE_CUSTOM
+enum ENUM_SIGNAL_DIRECTION
 {
-   ORDER_MARKET_BUY,      // Market Buy
-   ORDER_MARKET_SELL,     // Market Sell
-   ORDER_BUY_LIMIT,       // Buy Limit
-   ORDER_SELL_LIMIT,      // Sell Limit
-   ORDER_BUY_STOP,        // Buy Stop
-   ORDER_STOP_SELL        // Sell Stop
+   SIGNAL_BUY,      // Buy Signal
+   SIGNAL_SELL      // Sell Signal
 };
 
-input ENUM_ORDER_TYPE_CUSTOM InpOrderType = ORDER_MARKET_BUY;  // Order Type
-input double InpEntryPrice = 0.0;                               // Entry Price (0=Market)
+input ENUM_SIGNAL_DIRECTION InpSignalDirection = SIGNAL_BUY;   // Signal Direction
+input double InpEntryPrice = 0.0;                               // Entry Price (required)
 input double InpStopLossPrice = 0.0;                           // Stop Loss Price (0=None)
 input double InpTakeProfitPrice = 0.0;                         // Take Profit Price (0=None)
 
@@ -85,6 +81,12 @@ int OnInit()
    if(InpStartingBalance <= 0)
    {
       Print("Error: Starting balance must be greater than 0");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+   
+   if(InpEntryPrice <= 0)
+   {
+      Print("Error: Entry price must be specified");
       return INIT_PARAMETERS_INCORRECT;
    }
    
@@ -171,13 +173,7 @@ void OnTick()
          return;
    }
    
-   //--- Get symbol info
-   string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
-   
-   //--- Get current prices
-   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
-   double entryPrice = (InpEntryPrice > 0) ? InpEntryPrice : 0;
+   //--- Get symbol infInpEntryPrice;
    
    //--- Calculate lot size based on risk
    double lotSize;
@@ -188,8 +184,12 @@ void OnTick()
    else
    {
       // Calculate stop loss distance in points for risk calculation
-      double entryPriceForCalc = (InpEntryPrice > 0) ? InpEntryPrice : 
-                                  ((InpOrderType == ORDER_MARKET_BUY || InpOrderType == ORDER_BUY_LIMIT || InpOrderType == ORDER_BUY_STOP) ? ask : bid);
+      double stopLossDistance = 0;
+      
+      if(InpStopLossPrice > 0)
+      {
+         double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+         stopLossDistance = MathAbs(entryPriceRDER_MARKET_BUY || InpOrderType == ORDER_BUY_LIMIT || InpOrderType == ORDER_BUY_STOP) ? ask : bid);
       double stopLossDistance = 0;
       
       if(InpStopLossPrice > 0)
@@ -216,51 +216,53 @@ void OnTick()
    if(takeProfit > 0)
       takeProfit = NormalizeDouble(takeProfit, digits);
    
-   //--- Place order based on type
+   //--- Determine order type based on signal direction and current price
    bool result = false;
-   switch(InpOrderType)
+   string orderTypeStr = "";
+   
+   if(InpSignalDirection == SIGNAL_BUY)
    {
-      case ORDER_MARKET_BUY:
-         result = trade.Buy(lotSize, symbol, 0, stopLoss, takeProfit, InpTradeComment);
-         break;
-         
-      case ORDER_MARKET_SELL:
-         result = trade.Sell(lotSize, symbol, 0, stopLoss, takeProfit, InpTradeComment);
-         break;
-         
-      case ORDER_BUY_LIMIT:
-         if(entryPrice > 0)
-            result = trade.BuyLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
-         break;
-         
-      case ORDER_SELL_LIMIT:
-         if(entryPrice > 0)
-            result = trade.SellLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
-         break;
-         
-      case ORDER_BUY_STOP:
-         if(entryPrice > 0)
-            result = trade.BuyStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
-         break;
-         
-      case ORDER_STOP_SELL:
-         if(entryPrice > 0)
-            result = trade.SellStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
-         break;
+      // Buy signal: use Limit if entry below current price, Stop if above
+      if(entryPrice < ask)
+      {
+         result = trade.BuyLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
+         orderTypeStr = "Buy Limit";
+      }
+      else
+      {
+         result = trade.BuyStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
+         orderTypeStr = "Buy Stop";
+      }
+   }
+   else // SIGNAL_SELL
+   {
+      // Sell signal: use Limit if entry above current price, Stop if below
+      if(entryPrice > bid)
+      {
+         result = trade.SellLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
+         orderTypeStr = "Sell Limit";
+      }
+      else
+      {
+         result = trade.SellStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
+         orderTypeStr = "Sell Stop";
+      }
    }
    
    if(result)
    {
       datetime entryTime = TimeCurrent();
       Print("========================================");
-      Print("SIGNAL VALIDATED - Order Placed");
-      Print("Entry Time: ", TimeToString(entryTime, TIME_DATE|TIME_SECONDS));
+      Print("SIGNAL VALIDATED - Pending Order Placed");
+      Print("Signal Time: ", TimeToString(entryTime, TIME_DATE|TIME_SECONDS));
       Print("Symbol: ", symbol);
-      Print("Order Type: ", EnumToString(InpOrderType));
+      Print("Direction: ", (InpSignalDirection == SIGNAL_BUY ? "BUY" : "SELL"));
+      Print("Order Type: ", orderTypeStr);
       Print("Lot Size: ", lotSize);
-      Print("Entry Price: ", (entryPrice > 0 ? entryPrice : (InpOrderType == ORDER_MARKET_BUY ? ask : bid)));
+      Print("Entry Price: ", DoubleToString(entryPrice, digits));
       Print("Stop Loss: ", (stopLoss > 0 ? DoubleToString(stopLoss, digits) : "None"));
       Print("Take Profit: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
+      Print("Current Ask: ", DoubleToString(ask, digits), " | Bid: ", DoubleToString(bid, digits));
       Print("========================================");
       orderPlaced = true;
    }
