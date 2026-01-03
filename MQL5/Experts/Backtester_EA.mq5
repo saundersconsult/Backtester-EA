@@ -234,6 +234,10 @@ void OnTick()
    
    Print(">>> Determining order type...");
    
+   //--- Declare variables for order placement
+   bool result = false;
+   string orderTypeStr = "";
+   
    if(InpSignalDirection == SIGNAL_BUY)
    {
       // Buy signal: use Limit if entry below current price, Stop if above
