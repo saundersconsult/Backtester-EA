@@ -1,64 +1,56 @@
 # Backtester-EA
 
-MetaTrader 5 Expert Advisor for precise backtesting with configurable order entry parameters.
+MetaTrader 5 Expert Advisor for precise signal validation backtesting with timezone support and exact entry timing.
 
 ## Features
 
-- **Configurable Order Entry**: Set order type, instrument, entry price, stop loss, and take profit
-- **Exact Time Entry**: Enter trades at specific date/time down to the second for tracking specific market events
-- **Risk Management**: Define risk as percentage of account balance
-- **Flexible Balance**: Set starting account balance for backtesting
-- **Any Timeframe**: Works on all MT5 timeframes (M1, M5, H1, D1, etc.)
-- **Optimization Ready**: All parameters can be optimized in MT5 Strategy Tester
+- **Signal Validation**: Test signals from providers at exact times with exact entry/exit prices
+- **Timezone Support**: Enter signals in your own timezone - EA converts to broker timezone automatically
+- **Exact Time Entry**: Trade at specific date/time (down to the second) for precise signal testing
+- **Flexible SL/TP**: Test with or without stop loss, take profit, or both
+- **Risk Management**: Automatic lot sizing based on risk percentage and stop loss distance
+- **Any Symbol/Timeframe**: Works on all MT5 symbols and timeframes
+- **Pending Orders Only**: Places pending Limit/Stop orders (no market orders) for accurate backtest conditions
 
-## Installation
+## Quick Start
 
-1. Copy `MQL5/Experts/Backtester_EA.mq5` to your MT5 `Experts` folder
-2. Copy files from `MQL5/Include/` to your MT5 `Include` folder
+1. Copy `MQL5/Experts/Backtester_EA.mq5` to MT5 `Experts` folder
+2. Copy `MQL5/Include/BacktesterRisk.mqh` to MT5 `Include` folder
 3. Compile in MetaEditor (F7)
-4. Attach to any chart in MT5
+4. In Strategy Tester: Set signal parameters → Run without Optimization → Check Journal
 
-## Parameters
+## Configuration
 
-### Order Settings
-- **OrderType**: Market Buy, Market Sell, Buy Limit, Sell Limit, Buy Stop, Sell Stop
-- **EntryPrice**: Entry price (0 = current market price for market orders)
-- **StopLoss**: Stop loss price in points or absolute price
-- **TakeProfit**: Take profit price in points or absolute price
+**Signal Settings:**
+- `Signal Timezone UTC Offset`: Your signal's timezone (e.g., -5 for EST, 0 for UTC, +5.5 for IST)
+- `Entry Year/Month/Day/Hour/Minute/Second`: Signal time in that timezone
 
-### Risk Management
-- **RiskPercent**: Risk per trade as % of balance (e.g., 1.0 = 1%)
-- **StartingBalance**: Initial account balance for backtest
+**Order Details:**
+- `Signal Direction`: BUY or SELL
+- `Entry Price`: Exact entry price (required)
+- `Stop Loss Price`: SL price, or 0 for no stop loss
+- `Take Profit Price`: TP price, or 0 for no take profit
 
-### Execution
-- **Symbol**: Trading instrument (auto-detects current chart symbol)
-- **MagicNumber**: Unique identifier for EA trades
-- **EnableOptimization**: Enable/disable parameter optimization
+**Risk:**
+- `Risk Percent`: Risk per trade as % (e.g., 1.0 = 1%)
+- `Use Fixed Lot Size`: Optional fixed lot size instead of risk-based
 
-### Exact Timing
-- **UseExactTime**: Enable precise entry at specific date/time
-- **EntryYear/Month/Day/Hour/Minute/Second**: Exact entry timestamp
+## How It Works
 
-## Usage
-
-### Basic Backtest
-1. Open Strategy Tester (Ctrl+R)
-2. Select `Backtester_EA`
-3. Configure parameters in "Inputs" tab
-4. Set date range and run backtest
-
-### With Optimization
-1. Enable "Optimization" in Strategy Tester
-2. Select parameters to optimize
-3. Run optimization to find best settings
+1. **Entry Signal**: Specify time in your signal provider's timezone
+2. **Timezone Conversion**: EA auto-detects broker UTC offset, converts signal time accordingly
+3. **Order Placement**: At exact broker time, places pending order (Limit/Stop based on entry price vs current price)
+4. **Backtest Result**: See if signal would have been profitable using actual tick data
 
 ## Documentation
 
-See `docs/` folder for:
-- Detailed parameter descriptions
-- Risk calculation examples
-- Optimization guides
-- Best practices
+See `docs/` folder:
+- `PARAMETERS.md`: Detailed parameter guide
+- `INSTALLATION.md`: Setup instructions
+
+## Version
+
+**v1.06** - Fixed optional SL/TP handling, UTC timezone support, risk-based lot sizing
 
 ## Requirements
 
@@ -67,4 +59,4 @@ See `docs/` folder for:
 
 ## License
 
-MIT License - See LICENSE file
+MIT License
