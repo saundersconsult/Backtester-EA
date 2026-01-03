@@ -1,0 +1,26 @@
+# MQL5 compiled files
+*.ex5
+
+# MT5 data files
+*.hst
+*.fxt
+tester/
+logs/
+
+# Optimization results
+*.opt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Temporary files
+*.tmp
+*.bak
+*~
