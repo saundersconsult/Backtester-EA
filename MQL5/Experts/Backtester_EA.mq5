@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Backtester-EA"
 #property link      ""
-#property version   "1.09"
+#property version   "1.10"
 #property description "Signal validator EA with timezone-based entry time, visual lines, and absolute price levels"
 
 #include <Trade\Trade.mqh>
@@ -88,12 +88,19 @@ void DrawOrUpdateLine(const string name, const double price, const color lineCol
       return;
    }
 
-   // Recreate as horizontal line to avoid any previous object type conflicts
+   // Recreate as horizontal trend line with two anchor points at same price to eliminate any slope
    ObjectDelete(0, name);
    double p = NormalizeDouble(price, digits);
-   ObjectCreate(0, name, OBJ_HLINE, 0, 0, p);
 
-   ObjectSetDouble(0, name, OBJPROP_PRICE, p);
+   // Anchor points far enough apart to stay flat visually
+   datetime t1 = TimeCurrent();
+   int periodSec = (int)PeriodSeconds(PERIOD_CURRENT);
+   if(periodSec <= 0) periodSec = 60;
+   datetime t2 = t1 + (datetime)(periodSec * 500); // extend into the future
+
+   ObjectCreate(0, name, OBJ_TREND, 0, t1, p, t2, p);
+   ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, true);
+   ObjectSetInteger(0, name, OBJPROP_RAY_LEFT, false);
    ObjectSetInteger(0, name, OBJPROP_COLOR, lineColor);
    ObjectSetInteger(0, name, OBJPROP_STYLE, style);
    ObjectSetInteger(0, name, OBJPROP_WIDTH, ClampLineWidth(width));
@@ -117,13 +124,13 @@ void UpdateVisualLines()
       return;
    }
 
-    int digits = (int)SymbolInfoInteger((InpSymbol == "") ? _Symbol : InpSymbol, SYMBOL_DIGITS);
+   int digits = (int)SymbolInfoInteger((InpSymbol == "") ? _Symbol : InpSymbol, SYMBOL_DIGITS);
 
-    DrawOrUpdateLine(linePrefix + "Entry", InpEntryPrice, InpEntryLineColor, InpEntryLineStyle, InpEntryLineWidth, digits);
-    DrawOrUpdateLine(linePrefix + "TP", InpTakeProfitPrice, InpTakeProfitLineColor, InpTpLineStyle, InpTpLineWidth, digits);
-    DrawOrUpdateLine(linePrefix + "SL", InpStopLossPrice, InpStopLossLineColor, InpSlLineStyle, InpSlLineWidth, digits);
+   DrawOrUpdateLine(linePrefix + "Entry", InpEntryPrice, InpEntryLineColor, InpEntryLineStyle, InpEntryLineWidth, digits);
+   DrawOrUpdateLine(linePrefix + "TP", InpTakeProfitPrice, InpTakeProfitLineColor, InpTpLineStyle, InpTpLineWidth, digits);
+   DrawOrUpdateLine(linePrefix + "SL", InpStopLossPrice, InpStopLossLineColor, InpSlLineStyle, InpSlLineWidth, digits);
 
-    ChartRedraw(0);
+   ChartRedraw(0);
 }
 
 //+------------------------------------------------------------------+
