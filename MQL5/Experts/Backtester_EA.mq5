@@ -180,10 +180,6 @@ void OnTick()
       
       //--- Skip if order already placed (for single-trade mode)
       if(orderPlaced)
-   
-   Print(">>> Current Prices - Bid: ", bid, " Ask: ", ask);
-   Print(">>> Entry Price: ", entryPrice);
-   Print(">>> Signal Direction: ", (InpSignalDirection == SIGNAL_BUY ? "BUY" : "SELL"));
          return;
    }
    
@@ -196,6 +192,10 @@ void OnTick()
    double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
    double entryPrice = InpEntryPrice;
+   
+   Print(">>> Current Prices - Bid: ", bid, " Ask: ", ask);
+   Print(">>> Entry Price: ", entryPrice);
+   Print(">>> Signal Direction: ", (InpSignalDirection == SIGNAL_BUY ? "BUY" : "SELL"));
    
    //--- Calculate lot size based on risk
    double lotSize;
@@ -276,11 +276,7 @@ void OnTick()
    {
       Print(">>> Error code: ", GetLastError());
       Print(">>> Return code: ", trade.ResultRetcode());
-      Print(">>> Description: ", trade.ResultRetcodeDescription());lse
-      {
-         result = trade.SellStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
-         orderTypeStr = "Sell Stop";
-      }
+      Print(">>> Description: ", trade.ResultRetcodeDescription());
    }
    
    if(result)
