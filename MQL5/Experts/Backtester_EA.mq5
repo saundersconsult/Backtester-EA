@@ -267,14 +267,16 @@ void OnTick()
       {
          orderTypeStr = "Buy Limit";
          Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") < Ask (", ask, ")");
-         Print(">>> Lot: ", lotSize, " SL: ", stopLoss, " TP: ", takeProfit);
+         Print(">>> Lot: ", lotSize, " SL: ", (stopLoss > 0 ? DoubleToString(stopLoss, digits) : "None"), 
+               " TP: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
          result = trade.BuyLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
       }
       else
       {
          orderTypeStr = "Buy Stop";
          Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") >= Ask (", ask, ")");
-         Print(">>> Lot: ", lotSize, " SL: ", stopLoss, " TP: ", takeProfit);
+         Print(">>> Lot: ", lotSize, " SL: ", (stopLoss > 0 ? DoubleToString(stopLoss, digits) : "None"), 
+               " TP: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
          result = trade.BuyStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
       }
    }
@@ -285,14 +287,16 @@ void OnTick()
       {
          orderTypeStr = "Sell Limit";
          Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") > Bid (", bid, ")");
-         Print(">>> Lot: ", lotSize, " SL: ", stopLoss, " TP: ", takeProfit);
+         Print(">>> Lot: ", lotSize, " SL: ", (stopLoss > 0 ? DoubleToString(stopLoss, digits) : "None"), 
+               " TP: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
          result = trade.SellLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
       }
       else
       {
          orderTypeStr = "Sell Stop";
          Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") <= Bid (", bid, ")");
-         Print(">>> Lot: ", lotSize, " SL: ", stopLoss, " TP: ", takeProfit);
+         Print(">>> Lot: ", lotSize, " SL: ", (stopLoss > 0 ? DoubleToString(stopLoss, digits) : "None"), 
+               " TP: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
          result = trade.SellStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
       }
    }
