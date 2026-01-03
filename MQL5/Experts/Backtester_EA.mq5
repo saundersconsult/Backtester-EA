@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Backtester-EA"
 #property link      ""
-#property version   "1.08"
+#property version   "1.09"
 #property description "Signal validator EA with timezone-based entry time, visual lines, and absolute price levels"
 
 #include <Trade\Trade.mqh>
@@ -55,8 +55,12 @@ input bool   InpShowVisualLines = false;                       // Show entry/SL/
 input color  InpEntryLineColor = clrDodgerBlue;                // Entry line color
 input color  InpTakeProfitLineColor = clrLimeGreen;            // Take Profit line color
 input color  InpStopLossLineColor = clrRed;                    // Stop Loss line color
-input int    InpLineWidth = 1;                                 // Line width (1-5)
-input int    InpLineStyle = STYLE_SOLID;                       // Line style (STYLE_SOLID/STYLE_DASH/STYLE_DOT)
+input int    InpEntryLineWidth = 1;                            // Entry line width (1-5)
+input int    InpTpLineWidth = 1;                               // TP line width (1-5)
+input int    InpSlLineWidth = 1;                               // SL line width (1-5)
+input int    InpEntryLineStyle = STYLE_SOLID;                  // Entry line style
+input int    InpTpLineStyle = STYLE_SOLID;                     // TP line style
+input int    InpSlLineStyle = STYLE_SOLID;                     // SL line style
 
 //--- Global Variables
 CTrade trade;
@@ -76,7 +80,7 @@ int ClampLineWidth(const int w)
    return w;
 }
 
-void DrawOrUpdateLine(const string name, const double price, const color lineColor)
+void DrawOrUpdateLine(const string name, const double price, const color lineColor, const int style, const int width, const int digits)
 {
    if(price <= 0)
    {
@@ -86,12 +90,13 @@ void DrawOrUpdateLine(const string name, const double price, const color lineCol
 
    // Recreate as horizontal line to avoid any previous object type conflicts
    ObjectDelete(0, name);
-   ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
+   double p = NormalizeDouble(price, digits);
+   ObjectCreate(0, name, OBJ_HLINE, 0, 0, p);
 
-   ObjectSetDouble(0, name, OBJPROP_PRICE, price);
+   ObjectSetDouble(0, name, OBJPROP_PRICE, p);
    ObjectSetInteger(0, name, OBJPROP_COLOR, lineColor);
-   ObjectSetInteger(0, name, OBJPROP_STYLE, InpLineStyle);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH, ClampLineWidth(InpLineWidth));
+   ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, ClampLineWidth(width));
    ObjectSetInteger(0, name, OBJPROP_BACK, false);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
@@ -112,9 +117,13 @@ void UpdateVisualLines()
       return;
    }
 
-   DrawOrUpdateLine(linePrefix + "Entry", InpEntryPrice, InpEntryLineColor);
-   DrawOrUpdateLine(linePrefix + "TP", InpTakeProfitPrice, InpTakeProfitLineColor);
-   DrawOrUpdateLine(linePrefix + "SL", InpStopLossPrice, InpStopLossLineColor);
+    int digits = (int)SymbolInfoInteger((InpSymbol == "") ? _Symbol : InpSymbol, SYMBOL_DIGITS);
+
+    DrawOrUpdateLine(linePrefix + "Entry", InpEntryPrice, InpEntryLineColor, InpEntryLineStyle, InpEntryLineWidth, digits);
+    DrawOrUpdateLine(linePrefix + "TP", InpTakeProfitPrice, InpTakeProfitLineColor, InpTpLineStyle, InpTpLineWidth, digits);
+    DrawOrUpdateLine(linePrefix + "SL", InpStopLossPrice, InpStopLossLineColor, InpSlLineStyle, InpSlLineWidth, digits);
+
+    ChartRedraw(0);
 }
 
 //+------------------------------------------------------------------+
