@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Backtester-EA"
 #property link      ""
-#property version   "1.07"
+#property version   "1.08"
 #property description "Signal validator EA with timezone-based entry time, visual lines, and absolute price levels"
 
 #include <Trade\Trade.mqh>
@@ -55,6 +55,8 @@ input bool   InpShowVisualLines = false;                       // Show entry/SL/
 input color  InpEntryLineColor = clrDodgerBlue;                // Entry line color
 input color  InpTakeProfitLineColor = clrLimeGreen;            // Take Profit line color
 input color  InpStopLossLineColor = clrRed;                    // Stop Loss line color
+input int    InpLineWidth = 1;                                 // Line width (1-5)
+input int    InpLineStyle = STYLE_SOLID;                       // Line style (STYLE_SOLID/STYLE_DASH/STYLE_DOT)
 
 //--- Global Variables
 CTrade trade;
@@ -67,6 +69,13 @@ int brokerUTCOffsetSeconds = 0;  // Broker's UTC offset in seconds
 string linePrefix = "";         // Prefix for visual objects
 
 //--- Helpers for visual lines
+int ClampLineWidth(const int w)
+{
+   if(w < 1) return 1;
+   if(w > 5) return 5;
+   return w;
+}
+
 void DrawOrUpdateLine(const string name, const double price, const color lineColor)
 {
    if(price <= 0)
@@ -75,15 +84,14 @@ void DrawOrUpdateLine(const string name, const double price, const color lineCol
       return;
    }
 
-   if(ObjectFind(0, name) < 0)
-   {
-      ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
-   }
+   // Recreate as horizontal line to avoid any previous object type conflicts
+   ObjectDelete(0, name);
+   ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
 
    ObjectSetDouble(0, name, OBJPROP_PRICE, price);
    ObjectSetInteger(0, name, OBJPROP_COLOR, lineColor);
-   ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID);
-   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, name, OBJPROP_STYLE, InpLineStyle);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, ClampLineWidth(InpLineWidth));
    ObjectSetInteger(0, name, OBJPROP_BACK, false);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
