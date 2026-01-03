@@ -5,28 +5,24 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Backtester-EA"
 #property link      ""
-#property version   "1.00"
-#property description "Configurable backtesting EA with precise order entry parameters"
+#property version   "1.05"
+#property description "Signal validator EA with timezone-based entry time, automatic broker TZ detection, and absolute price levels"
 
 #include <Trade\Trade.mqh>
 #include <BacktesterRisk.mqh>
 
 //--- Input Parameters
 input group "=== Order Settings ==="
-enum ENUM_ORDER_TYPE_CUSTOM
+enum ENUM_SIGNAL_DIRECTION
 {
-   ORDER_MARKET_BUY,      // Market Buy
-   ORDER_MARKET_SELL,     // Market Sell
-   ORDER_BUY_LIMIT,       // Buy Limit
-   ORDER_SELL_LIMIT,      // Sell Limit
-   ORDER_BUY_STOP,        // Buy Stop
-   ORDER_STOP_SELL        // Sell Stop
+   SIGNAL_BUY,      // Buy Signal
+   SIGNAL_SELL      // Sell Signal
 };
 
-input ENUM_ORDER_TYPE_CUSTOM InpOrderType = ORDER_MARKET_BUY;  // Order Type
-input double InpEntryPrice = 0.0;                               // Entry Price (0=Market)
-input double InpStopLossPoints = 50.0;                         // Stop Loss (points)
-input double InpTakeProfitPoints = 100.0;                      // Take Profit (points)
+input ENUM_SIGNAL_DIRECTION InpSignalDirection = SIGNAL_BUY;   // Signal Direction
+input double InpEntryPrice = 0.0;                               // Entry Price (required)
+input double InpStopLossPrice = 0.0;                           // Stop Loss Price (0=None)
+input double InpTakeProfitPrice = 0.0;                         // Take Profit Price (0=None)
 
 input group "=== Risk Management ==="
 input double InpRiskPercent = 1.0;                             // Risk Per Trade (%)
@@ -46,12 +42,13 @@ input bool   InpEnableOptimization = false;                    // Enable Optimiz
 
 input group "=== Exact Entry Time ==="
 input bool   InpUseExactTime = false;                          // Use Exact Entry Time
-input int    InpEntryYear = 2025;                              // Entry Year
-input int    InpEntryMonth = 1;                                // Entry Month (1-12)
-input int    InpEntryDay = 1;                                  // Entry Day (1-31)
-input int    InpEntryHour = 9;                                 // Entry Hour (0-23)
-input int    InpEntryMinute = 30;                              // Entry Minute (0-59)
-input int    InpEntrySecond = 0;                               // Entry Second (0-59)
+input double InpSignalTimezoneOffset = 0.0;                    // Signal Timezone UTC Offset (hours, e.g., -5 for EST)
+input int    InpEntryYear = 2025;                              // Entry Year (in signal timezone)
+input int    InpEntryMonth = 1;                                // Entry Month (1-12, in signal timezone)
+input int    InpEntryDay = 1;                                  // Entry Day (1-31, in signal timezone)
+input int    InpEntryHour = 9;                                 // Entry Hour (0-23, in signal timezone)
+input int    InpEntryMinute = 30;                              // Entry Minute (0-59, in signal timezone)
+input int    InpEntrySecond = 0;                               // Entry Second (0-59, in signal timezone)
 
 //--- Global Variables
 CTrade trade;
@@ -60,6 +57,7 @@ datetime lastBarTime = 0;
 bool orderPlaced = false;
 datetime exactEntryTime = 0;
 bool exactTimeReached = false;
+int brokerUTCOffsetSeconds = 0;  // Broker's UTC offset in seconds
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -70,6 +68,14 @@ int OnInit()
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFilling(ORDER_FILLING_FOK);
+   
+   //--- Detect broker's UTC offset
+   datetime serverTime = TimeCurrent();   // Server time in broker timezone
+   datetime gmtTime = TimeGMT();          // GMT/UTC time
+   brokerUTCOffsetSeconds = (int)(serverTime - gmtTime);
+   
+   double brokerUTCOffset = brokerUTCOffsetSeconds / 3600.0;
+   Print("Broker UTC offset: ", brokerUTCOffset, " hours");
    
    //--- Initialize risk calculator
    string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
@@ -88,32 +94,54 @@ int OnInit()
       return INIT_PARAMETERS_INCORRECT;
    }
    
+   if(InpEntryPrice <= 0)
+   {
+      Print("Error: Entry price must be specified");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+   
    //--- Build exact entry time if enabled
    if(InpUseExactTime)
    {
-      MqlDateTime dt;
-      dt.year = InpEntryYear;
-      dt.mon = InpEntryMonth;
-      dt.day = InpEntryDay;
-      dt.hour = InpEntryHour;
-      dt.min = InpEntryMinute;
-      dt.sec = InpEntrySecond;
+      //--- Create time from inputs (in signal timezone)
+      MqlDateTime dtSignal;
+      dtSignal.year = InpEntryYear;
+      dtSignal.mon = InpEntryMonth;
+      dtSignal.day = InpEntryDay;
+      dtSignal.hour = InpEntryHour;
+      dtSignal.min = InpEntryMinute;
+      dtSignal.sec = InpEntrySecond;
       
-      exactEntryTime = StructToTime(dt);
+      datetime signalTime = StructToTime(dtSignal);
       
-      if(exactEntryTime <= 0)
+      if(signalTime <= 0)
       {
          Print("Error: Invalid entry date/time specified");
          return INIT_PARAMETERS_INCORRECT;
       }
       
-      Print("Exact entry time set to: ", TimeToString(exactEntryTime, TIME_DATE|TIME_SECONDS));
+      //--- Convert signal timezone to UTC
+      int signalTZOffsetSeconds = (int)(InpSignalTimezoneOffset * 3600);
+      datetime utcTime = signalTime - signalTZOffsetSeconds;
+      
+      //--- Convert UTC to broker's local time
+      exactEntryTime = utcTime + brokerUTCOffsetSeconds;
+      
+      Print("Signal time entered: ", TimeToString(signalTime, TIME_DATE|TIME_SECONDS), 
+            " (", InpSignalTimezoneOffset, " UTC)");
+      Print("Converted to UTC: ", TimeToString(utcTime, TIME_DATE|TIME_SECONDS));
+      Print("Broker UTC offset: ", (brokerUTCOffsetSeconds / 3600.0), " hours");
+      Print("Exact entry time (broker local): ", TimeToString(exactEntryTime, TIME_DATE|TIME_SECONDS));
    }
    
    Print("Backtester-EA initialized successfully");
    Print("Symbol: ", symbol);
    Print("Starting Balance: ", InpStartingBalance);
    Print("Risk per trade: ", InpRiskPercent, "%");
+   if(InpStopLossPrice > 0)
+      Print("Stop Loss: ", InpStopLossPrice);
+   if(InpTakeProfitPrice > 0)
+      Print("Take Profit: ", InpTakeProfitPrice);
    
    return INIT_SUCCEEDED;
 }
@@ -144,12 +172,22 @@ void OnTick()
       if(!exactTimeReached && currentTime >= exactEntryTime)
       {
          exactTimeReached = true;
-         Print("Exact entry time reached: ", TimeToString(currentTime, TIME_DATE|TIME_SECONDS));
+         Print(">>> EXACT TIME REACHED: ", TimeToString(currentTime, TIME_DATE|TIME_SECONDS));
+         Print(">>> Proceeding to place order...");
       }
       
       // Skip if we already placed order after reaching exact time
       if(exactTimeReached && orderPlaced)
+      {
          return;
+      }
+      
+      if(!exactTimeReached)
+      {
+         Print("DEBUG: Waiting for exact time. Current: ", TimeToString(currentTime, TIME_DATE|TIME_SECONDS), 
+               " Target: ", TimeToString(exactEntryTime, TIME_DATE|TIME_SECONDS));
+         return;
+      }
    }
    else
    {
@@ -167,8 +205,19 @@ void OnTick()
          return;
    }
    
+   Print(">>> Preparing order placement...");
+   
    //--- Get symbol info
    string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
+   
+   //--- Get current prices
+   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+   double entryPrice = InpEntryPrice;
+   
+   Print(">>> Current Prices - Bid: ", bid, " Ask: ", ask);
+   Print(">>> Entry Price: ", entryPrice);
+   Print(">>> Signal Direction: ", (InpSignalDirection == SIGNAL_BUY ? "BUY" : "SELL"));
    
    //--- Calculate lot size based on risk
    double lotSize;
@@ -178,63 +227,102 @@ void OnTick()
    }
    else
    {
-      lotSize = riskCalc.CalculateLotSize(InpRiskPercent, InpStopLossPoints);
+      // Calculate stop loss distance in points for risk calculation
+      double stopLossDistance = 0;
+      
+      if(InpStopLossPrice > 0)
+      {
+         double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+         stopLossDistance = MathAbs(entryPrice - InpStopLossPrice) / point;
+      }
+      else
+      {
+         stopLossDistance = 50; // Default if no SL specified
+      }
+      
+      lotSize = riskCalc.CalculateLotSize(InpRiskPercent, stopLossDistance);
    }
    
-   //--- Get current prices
-   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
-   double entryPrice = (InpEntryPrice > 0) ? InpEntryPrice : 0;
+   //--- Use absolute SL and TP prices
+   double stopLoss = InpStopLossPrice;
+   double takeProfit = InpTakeProfitPrice;
    
-   //--- Calculate SL and TP
-   double stopLoss = 0, takeProfit = 0;
-   CalculateStopLevels(InpOrderType, entryPrice, stopLoss, takeProfit);
+   //--- Normalize prices
+   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   if(stopLoss > 0)
+      stopLoss = NormalizeDouble(stopLoss, digits);
+   if(takeProfit > 0)
+      takeProfit = NormalizeDouble(takeProfit, digits);
    
-   //--- Place order based on type
+   Print(">>> Determining order type...");
+   
+   //--- Declare variables for order placement
    bool result = false;
-   switch(InpOrderType)
+   string orderTypeStr = "";
+   
+   if(InpSignalDirection == SIGNAL_BUY)
    {
-      case ORDER_MARKET_BUY:
-         result = trade.Buy(lotSize, symbol, 0, stopLoss, takeProfit, InpTradeComment);
-         break;
-         
-      case ORDER_MARKET_SELL:
-         result = trade.Sell(lotSize, symbol, 0, stopLoss, takeProfit, InpTradeComment);
-         break;
-         
-      case ORDER_BUY_LIMIT:
-         if(entryPrice > 0)
-            result = trade.BuyLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
-         break;
-         
-      case ORDER_SELL_LIMIT:
-         if(entryPrice > 0)
-            result = trade.SellLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
-         break;
-         
-      case ORDER_BUY_STOP:
-         if(entryPrice > 0)
-            result = trade.BuyStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
-         break;
-         
-      case ORDER_STOP_SELL:
-         if(entryPrice > 0)
-            result = trade.SellStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
-         break;
+      // Buy signal: use Limit if entry below current price, Stop if above
+      if(entryPrice < ask)
+      {
+         orderTypeStr = "Buy Limit";
+         Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") < Ask (", ask, ")");
+         Print(">>> Lot: ", lotSize, " SL: ", (stopLoss > 0 ? DoubleToString(stopLoss, digits) : "None"), 
+               " TP: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
+         result = trade.BuyLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
+      }
+      else
+      {
+         orderTypeStr = "Buy Stop";
+         Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") >= Ask (", ask, ")");
+         Print(">>> Lot: ", lotSize, " SL: ", (stopLoss > 0 ? DoubleToString(stopLoss, digits) : "None"), 
+               " TP: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
+         result = trade.BuyStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
+      }
+   }
+   else // SIGNAL_SELL
+   {
+      // Sell signal: use Limit if entry above current price, Stop if below
+      if(entryPrice > bid)
+      {
+         orderTypeStr = "Sell Limit";
+         Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") > Bid (", bid, ")");
+         Print(">>> Lot: ", lotSize, " SL: ", (stopLoss > 0 ? DoubleToString(stopLoss, digits) : "None"), 
+               " TP: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
+         result = trade.SellLimit(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
+      }
+      else
+      {
+         orderTypeStr = "Sell Stop";
+         Print(">>> Placing ", orderTypeStr, " - Entry (", entryPrice, ") <= Bid (", bid, ")");
+         Print(">>> Lot: ", lotSize, " SL: ", (stopLoss > 0 ? DoubleToString(stopLoss, digits) : "None"), 
+               " TP: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
+         result = trade.SellStop(lotSize, entryPrice, symbol, stopLoss, takeProfit, ORDER_TIME_GTC, 0, InpTradeComment);
+      }
+   }
+   
+   Print(">>> Order placement result: ", (result ? "SUCCESS" : "FAILED"));
+   if(!result)
+   {
+      Print(">>> Error code: ", GetLastError());
+      Print(">>> Return code: ", trade.ResultRetcode());
+      Print(">>> Description: ", trade.ResultRetcodeDescription());
    }
    
    if(result)
    {
       datetime entryTime = TimeCurrent();
       Print("========================================");
-      Print("Order placed successfully!");
-      Print("Entry Time: ", TimeToString(entryTime, TIME_DATE|TIME_SECONDS));
+      Print("SIGNAL VALIDATED - Pending Order Placed");
+      Print("Signal Time: ", TimeToString(entryTime, TIME_DATE|TIME_SECONDS));
       Print("Symbol: ", symbol);
-      Print("Order Type: ", EnumToString(InpOrderType));
+      Print("Direction: ", (InpSignalDirection == SIGNAL_BUY ? "BUY" : "SELL"));
+      Print("Order Type: ", orderTypeStr);
       Print("Lot Size: ", lotSize);
-      Print("Entry Price: ", (entryPrice > 0 ? entryPrice : (InpOrderType == ORDER_MARKET_BUY ? ask : bid)));
-      Print("Stop Loss: ", stopLoss);
-      Print("Take Profit: ", takeProfit);
+      Print("Entry Price: ", DoubleToString(entryPrice, digits));
+      Print("Stop Loss: ", (stopLoss > 0 ? DoubleToString(stopLoss, digits) : "None"));
+      Print("Take Profit: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
+      Print("Current Ask: ", DoubleToString(ask, digits), " | Bid: ", DoubleToString(bid, digits));
       Print("========================================");
       orderPlaced = true;
    }
@@ -242,39 +330,5 @@ void OnTick()
    {
       Print("Order failed. Error: ", GetLastError(), " - ", trade.ResultRetcodeDescription());
    }
-}
-
-//+------------------------------------------------------------------+
-//| Calculate stop loss and take profit levels                       |
-//+------------------------------------------------------------------+
-void CalculateStopLevels(ENUM_ORDER_TYPE_CUSTOM orderType, double entryPrice, double &sl, double &tp)
-{
-   string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
-   double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
-   
-   //--- Use entry price or current price
-   double basePrice = (entryPrice > 0) ? entryPrice : 
-                      ((orderType == ORDER_MARKET_BUY || orderType == ORDER_BUY_LIMIT || orderType == ORDER_BUY_STOP) ? ask : bid);
-   
-   //--- Calculate SL and TP based on order type
-   if(orderType == ORDER_MARKET_BUY || orderType == ORDER_BUY_LIMIT || orderType == ORDER_BUY_STOP)
-   {
-      // Buy orders
-      sl = (InpStopLossPoints > 0) ? basePrice - (InpStopLossPoints * point) : 0;
-      tp = (InpTakeProfitPoints > 0) ? basePrice + (InpTakeProfitPoints * point) : 0;
-   }
-   else
-   {
-      // Sell orders
-      sl = (InpStopLossPoints > 0) ? basePrice + (InpStopLossPoints * point) : 0;
-      tp = (InpTakeProfitPoints > 0) ? basePrice - (InpTakeProfitPoints * point) : 0;
-   }
-   
-   //--- Normalize prices
-   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-   sl = NormalizeDouble(sl, digits);
-   tp = NormalizeDouble(tp, digits);
 }
 //+------------------------------------------------------------------+
