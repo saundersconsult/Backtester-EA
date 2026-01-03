@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Backtester-EA"
 #property link      ""
-#property version   "1.02"
-#property description "Signal validator EA with exact entry time and absolute price levels"
+#property version   "1.03"
+#property description "Signal validator EA with exact entry time, timezone support, and absolute price levels"
 
 #include <Trade\Trade.mqh>
 #include <BacktesterRisk.mqh>
@@ -48,6 +48,7 @@ input int    InpEntryDay = 1;                                  // Entry Day (1-3
 input int    InpEntryHour = 9;                                 // Entry Hour (0-23)
 input int    InpEntryMinute = 30;                              // Entry Minute (0-59)
 input int    InpEntrySecond = 0;                               // Entry Second (0-59)
+input double InpTimezoneOffset = 0.0;                          // Timezone Offset from Broker (hours, e.g., -5 for EST)
 
 //--- Global Variables
 CTrade trade;
@@ -109,7 +110,15 @@ int OnInit()
          return INIT_PARAMETERS_INCORRECT;
       }
       
-      Print("Exact entry time set to: ", TimeToString(exactEntryTime, TIME_DATE|TIME_SECONDS));
+      //--- Apply timezone offset (convert from signal timezone to broker timezone)
+      // Negative offset means signal timezone is behind broker (e.g., -5 for EST when broker is UTC)
+      // Positive offset means signal timezone is ahead of broker
+      int offsetSeconds = (int)(InpTimezoneOffset * 3600);
+      exactEntryTime -= offsetSeconds;
+      
+      Print("Signal time entered: ", TimeToString(StructToTime(dt), TIME_DATE|TIME_SECONDS));
+      Print("Timezone offset: ", InpTimezoneOffset, " hours");
+      Print("Exact entry time (broker timezone): ", TimeToString(exactEntryTime, TIME_DATE|TIME_SECONDS));
    }
    
    Print("Backtester-EA initialized successfully");
