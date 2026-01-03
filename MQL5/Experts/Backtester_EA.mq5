@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Backtester-EA"
 #property link      ""
-#property version   "1.10"
+#property version   "1.11"
 #property description "Signal validator EA with timezone-based entry time, visual lines, and absolute price levels"
 
 #include <Trade\Trade.mqh>
@@ -62,6 +62,26 @@ input int    InpEntryLineStyle = STYLE_SOLID;                  // Entry line sty
 input int    InpTpLineStyle = STYLE_SOLID;                     // TP line style
 input int    InpSlLineStyle = STYLE_SOLID;                     // SL line style
 
+input group "=== Order Expiry ==="
+enum ENUM_EXPIRY_MODE
+{
+   EXPIRY_MINUTES,     // Expire after N minutes from placement
+   EXPIRY_HOURS,       // Expire after N hours from placement
+   EXPIRY_ABSOLUTE     // Expire at specific date/time
+};
+
+input bool   InpUseExpiry = false;                             // Enable order/position expiry
+input ENUM_EXPIRY_MODE InpExpiryMode = EXPIRY_MINUTES;         // Expiry mode
+input int    InpExpiryMinutes = 60;                            // Minutes until expiry (for minutes mode)
+input int    InpExpiryHours = 1;                               // Hours until expiry (for hours mode)
+input double InpExpiryTimezoneOffset = 0.0;                    // Expiry absolute time timezone offset (hours)
+input int    InpExpiryYear = 2025;                             // Expiry Year (absolute mode)
+input int    InpExpiryMonth = 1;                               // Expiry Month (1-12, absolute mode)
+input int    InpExpiryDay = 1;                                 // Expiry Day (1-31, absolute mode)
+input int    InpExpiryHour = 0;                                // Expiry Hour (0-23, absolute mode)
+input int    InpExpiryMinute = 0;                              // Expiry Minute (0-59, absolute mode)
+input int    InpExpirySecond = 0;                              // Expiry Second (0-59, absolute mode)
+
 //--- Global Variables
 CTrade trade;
 CBacktesterRisk riskCalc;
@@ -71,6 +91,10 @@ datetime exactEntryTime = 0;
 bool exactTimeReached = false;
 int brokerUTCOffsetSeconds = 0;  // Broker's UTC offset in seconds
 string linePrefix = "";         // Prefix for visual objects
+string persistentFlagName = ""; // Global variable key to persist one-and-done state
+string normalizedSymbol = "";    // Cached normalized symbol
+datetime expiryTime = 0;          // When to expire order/position (broker time)
+bool expirySet = false;           // Whether expiryTime is active
 
 //--- Helpers for visual lines
 int ClampLineWidth(const int w)
@@ -88,25 +112,26 @@ void DrawOrUpdateLine(const string name, const double price, const color lineCol
       return;
    }
 
-   // Recreate as horizontal trend line with two anchor points at same price to eliminate any slope
-   ObjectDelete(0, name);
    double p = NormalizeDouble(price, digits);
 
-   // Anchor points far enough apart to stay flat visually
-   datetime t1 = TimeCurrent();
-   int periodSec = (int)PeriodSeconds(PERIOD_CURRENT);
-   if(periodSec <= 0) periodSec = 60;
-   datetime t2 = t1 + (datetime)(periodSec * 500); // extend into the future
+   bool exists = (ObjectFind(0, name) >= 0);
+   if(!exists)
+   {
+      // Create once; HLINE stays perfectly horizontal
+      if(!ObjectCreate(0, name, OBJ_HLINE, 0, 0, p))
+      {
+         Print("Failed to create line: ", name, " error: ", GetLastError());
+         return;
+      }
+      ObjectSetInteger(0, name, OBJPROP_BACK, false);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   }
 
-   ObjectCreate(0, name, OBJ_TREND, 0, t1, p, t2, p);
-   ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, true);
-   ObjectSetInteger(0, name, OBJPROP_RAY_LEFT, false);
+   ObjectSetDouble(0, name, OBJPROP_PRICE, p);
    ObjectSetInteger(0, name, OBJPROP_COLOR, lineColor);
    ObjectSetInteger(0, name, OBJPROP_STYLE, style);
    ObjectSetInteger(0, name, OBJPROP_WIDTH, ClampLineWidth(width));
-   ObjectSetInteger(0, name, OBJPROP_BACK, false);
-   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
 }
 
 void RemoveVisualLines()
@@ -136,15 +161,13 @@ void UpdateVisualLines()
 //--- Trade state helpers
 bool HasActiveTradeOrOrder()
 {
-   string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
-
    // Open positions
    for(int i=0; i<PositionsTotal(); ++i)
    {
       ulong ticket = PositionGetTicket(i);
       if(PositionSelectByTicket(ticket))
       {
-         if(PositionGetInteger(POSITION_MAGIC) == InpMagicNumber && PositionGetString(POSITION_SYMBOL) == symbol)
+         if(PositionGetInteger(POSITION_MAGIC) == InpMagicNumber && PositionGetString(POSITION_SYMBOL) == normalizedSymbol)
             return true;
       }
    }
@@ -155,7 +178,7 @@ bool HasActiveTradeOrOrder()
       ulong ticket = OrderGetTicket(i);
       if(OrderSelect(ticket))
       {
-         if(OrderGetInteger(ORDER_MAGIC) == InpMagicNumber && OrderGetString(ORDER_SYMBOL) == symbol)
+         if(OrderGetInteger(ORDER_MAGIC) == InpMagicNumber && OrderGetString(ORDER_SYMBOL) == normalizedSymbol)
             return true;
       }
    }
@@ -165,21 +188,147 @@ bool HasActiveTradeOrOrder()
 
 bool HasHistoricalTrade()
 {
-   string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
-   if(!HistorySelect(0, TimeCurrent()))
+   if(!HistorySelect(0, LONG_MAX))
       return false;
 
+   // Check historical deals (closed/filled orders)
+   int deals = HistoryDealsTotal();
+   for(int i=0; i<deals; ++i)
+   {
+      ulong dealTicket = HistoryDealGetTicket(i);
+      if(dealTicket == 0)
+         continue;
+      if(!HistoryDealSelect(dealTicket))
+         continue;
+
+      long magic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+      string dealSymbol = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+      if(magic == InpMagicNumber && StringCompare(dealSymbol, normalizedSymbol, true) == 0)
+         return true;
+   }
+
+   // Fallback: check historical orders if no deals matched
    int total = HistoryOrdersTotal();
    for(int i=0; i<total; ++i)
    {
       ulong ticket = HistoryOrderGetTicket(i);
-      if(HistoryOrderSelect(ticket))
-      {
-         if(OrderGetInteger(ORDER_MAGIC) == InpMagicNumber && OrderGetString(ORDER_SYMBOL) == symbol)
-            return true;
-      }
+      if(ticket == 0)
+         continue;
+      if(!HistoryOrderSelect(ticket))
+         continue;
+
+      long magic = HistoryOrderGetInteger(ticket, ORDER_MAGIC);
+      string ordSymbol = HistoryOrderGetString(ticket, ORDER_SYMBOL);
+      if(magic == InpMagicNumber && StringCompare(ordSymbol, normalizedSymbol, true) == 0)
+         return true;
+   }
+
+   return false;
+}
+
+//--- Persistent guard helpers
+string BuildPersistentKey()
+{
+   return StringFormat("BTEA_%s_%d_PLACED", normalizedSymbol, InpMagicNumber);
+}
+
+bool HasPersistentFlag()
+{
+   string key = BuildPersistentKey();
+   if(GlobalVariableCheck(key))
+   {
+      double val = GlobalVariableGet(key);
+      return (val == 1.0);
    }
    return false;
+}
+
+void SetPersistentFlag()
+{
+   string key = BuildPersistentKey();
+   GlobalVariableSet(key, 1.0);
+}
+
+bool HasAnyTradeRecord()
+{
+   if(HasActiveTradeOrOrder())
+      return true;
+   if(HasHistoricalTrade())
+      return true;
+   if(HasPersistentFlag())
+      return true;
+   return false;
+}
+
+void MarkPlaced()
+{
+   orderPlaced = true;
+   SetPersistentFlag();
+}
+
+void ClearExpiry()
+{
+   expiryTime = 0;
+   expirySet = false;
+}
+
+void HandleExpiry()
+{
+   if(!InpUseExpiry || !expirySet || expiryTime <= 0)
+      return;
+
+   datetime now = TimeCurrent();
+   if(now < expiryTime)
+      return;
+
+   bool acted = false;
+
+   // Cancel pending orders for this magic/symbol
+   for(int i=OrdersTotal()-1; i>=0; --i)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(!OrderSelect(ticket))
+         continue;
+      if(OrderGetInteger(ORDER_MAGIC) == InpMagicNumber && StringCompare(OrderGetString(ORDER_SYMBOL), normalizedSymbol, true) == 0)
+      {
+         if(trade.OrderDelete(ticket))
+         {
+            acted = true;
+            Print("[Expiry] Pending order deleted: ", ticket);
+         }
+         else
+         {
+            Print("[Expiry] Failed to delete pending order ", ticket, " error=", GetLastError());
+         }
+      }
+   }
+
+   // Close open position for this magic/symbol
+   for(int i=PositionsTotal()-1; i>=0; --i)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetInteger(POSITION_MAGIC) == InpMagicNumber && StringCompare(PositionGetString(POSITION_SYMBOL), normalizedSymbol, true) == 0)
+      {
+         string sym = PositionGetString(POSITION_SYMBOL);
+         if(trade.PositionClose(sym))
+         {
+            acted = true;
+            Print("[Expiry] Position closed for symbol: ", sym);
+         }
+         else
+         {
+            Print("[Expiry] Failed to close position for symbol: ", sym, " error=", GetLastError());
+         }
+      }
+   }
+
+   if(acted)
+   {
+      ClearExpiry();
+      // Keep persistent flag; this still counts as the single signal handled
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -187,13 +336,19 @@ bool HasHistoricalTrade()
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   //--- Normalize and cache symbol (uppercase) for consistent comparisons
+   normalizedSymbol = (InpSymbol == "") ? _Symbol : InpSymbol;
+   normalizedSymbol = StringUpper(normalizedSymbol);
+   ClearExpiry();
+
    //--- Set trade parameters
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFilling(ORDER_FILLING_FOK);
 
-   //--- Set visual object prefix
+   //--- Set visual object prefix and persistent key
    linePrefix = StringFormat("BTEA_%d_", InpMagicNumber);
+   persistentFlagName = BuildPersistentKey();
    
    //--- Detect broker's UTC offset
    datetime serverTime = TimeCurrent();   // Server time in broker timezone
@@ -204,7 +359,7 @@ int OnInit()
    Print("Broker UTC offset: ", brokerUTCOffset, " hours");
    
    //--- Initialize risk calculator
-   string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
+   string symbol = normalizedSymbol;
    riskCalc.Init(symbol, InpStartingBalance);
    
    //--- Validate inputs
@@ -269,14 +424,38 @@ int OnInit()
    if(InpTakeProfitPrice > 0)
       Print("Take Profit: ", InpTakeProfitPrice);
 
+   //--- Build absolute expiry (broker local) if configured and absolute mode
+   if(InpUseExpiry && InpExpiryMode == EXPIRY_ABSOLUTE)
+   {
+      MqlDateTime dtExp;
+      dtExp.year = InpExpiryYear;
+      dtExp.mon = InpExpiryMonth;
+      dtExp.day = InpExpiryDay;
+      dtExp.hour = InpExpiryHour;
+      dtExp.min = InpExpiryMinute;
+      dtExp.sec = InpExpirySecond;
+      datetime expSignal = StructToTime(dtExp);
+      if(expSignal <= 0)
+      {
+         Print("Error: Invalid expiry date/time specified");
+         return INIT_PARAMETERS_INCORRECT;
+      }
+
+      int expTzOffsetSeconds = (int)(InpExpiryTimezoneOffset * 3600);
+      datetime expUtc = expSignal - expTzOffsetSeconds;
+      expiryTime = expUtc + brokerUTCOffsetSeconds;
+      expirySet = true;
+      Print("Expiry (absolute) set to broker time: ", TimeToString(expiryTime, TIME_DATE|TIME_SECONDS));
+   }
+
    //--- Visual lines (optional)
    UpdateVisualLines();
 
    //--- If any active or historical trades exist for this magic/symbol, mark as placed to prevent duplicates
-   if(HasActiveTradeOrOrder() || HasHistoricalTrade())
+   if(HasAnyTradeRecord())
    {
       orderPlaced = true;
-      Print("Found existing trade/order/history for this signal. Will not place another.");
+      Print("Found existing trade/order/history (or persistent flag) for this signal. Will not place another.");
    }
    
    return INIT_SUCCEEDED;
@@ -292,10 +471,47 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
+//| Trade transaction handler                                        |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest& request, const MqlTradeResult& result)
+{
+   // React to any deal/order involving our magic + symbol; mark placed to prevent re-entry
+   if(trans.type == TRADE_TRANSACTION_DEAL_ADD || trans.type == TRADE_TRANSACTION_DEAL_UPDATE)
+   {
+      long magic = (long)trans.deal_magic;
+      string sym = trans.symbol;
+      if(magic == InpMagicNumber && StringCompare(sym, normalizedSymbol, true) == 0)
+      {
+         MarkPlaced();
+      }
+   }
+
+   if(trans.type == TRADE_TRANSACTION_ORDER_ADD || trans.type == TRADE_TRANSACTION_ORDER_UPDATE || trans.type == TRADE_TRANSACTION_ORDER_DELETE)
+   {
+      long magic = (long)trans.order_magic;
+      string sym = trans.symbol;
+      if(magic == InpMagicNumber && StringCompare(sym, normalizedSymbol, true) == 0)
+      {
+         MarkPlaced();
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Expert tick function                                             |
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   //--- Handle expiry for existing orders/positions before guards
+   HandleExpiry();
+
+   //--- Global guard: if anything exists or was flagged, stop immediately
+   if(HasAnyTradeRecord())
+   {
+      orderPlaced = true;
+      return;
+   }
+
    //--- If using exact entry time, check if we've reached it
    if(InpUseExactTime)
    {
@@ -342,17 +558,10 @@ void OnTick()
          return;
    }
 
-   //--- Global guard: if any active or historical trade/order exists, do not place again
-   if(HasActiveTradeOrOrder() || HasHistoricalTrade())
-   {
-      orderPlaced = true;
-      return;
-   }
-   
    Print(">>> Preparing order placement...");
    
    //--- Get symbol info
-   string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
+   string symbol = normalizedSymbol;
    
    //--- Get current prices
    double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
@@ -468,7 +677,25 @@ void OnTick()
       Print("Take Profit: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
       Print("Current Ask: ", DoubleToString(ask, digits), " | Bid: ", DoubleToString(bid, digits));
       Print("========================================");
-      orderPlaced = true;
+      MarkPlaced();
+
+      //--- Set expiry time relative to placement if configured
+      if(InpUseExpiry)
+      {
+         if(InpExpiryMode == EXPIRY_MINUTES)
+         {
+            expiryTime = TimeCurrent() + (InpExpiryMinutes * 60);
+            expirySet = true;
+            Print("Expiry set (minutes): ", InpExpiryMinutes, " -> ", TimeToString(expiryTime, TIME_DATE|TIME_SECONDS));
+         }
+         else if(InpExpiryMode == EXPIRY_HOURS)
+         {
+            expiryTime = TimeCurrent() + (InpExpiryHours * 3600);
+            expirySet = true;
+            Print("Expiry set (hours): ", InpExpiryHours, " -> ", TimeToString(expiryTime, TIME_DATE|TIME_SECONDS));
+         }
+         // Absolute mode already set in OnInit
+      }
    }
    else
    {
