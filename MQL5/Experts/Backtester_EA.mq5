@@ -133,6 +133,55 @@ void UpdateVisualLines()
    ChartRedraw(0);
 }
 
+//--- Trade state helpers
+bool HasActiveTradeOrOrder()
+{
+   string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
+
+   // Open positions
+   for(int i=0; i<PositionsTotal(); ++i)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(PositionSelectByTicket(ticket))
+      {
+         if(PositionGetInteger(POSITION_MAGIC) == InpMagicNumber && PositionGetString(POSITION_SYMBOL) == symbol)
+            return true;
+      }
+   }
+
+   // Pending orders
+   for(int i=0; i<OrdersTotal(); ++i)
+   {
+      ulong ticket = OrderGetTicket(i);
+      if(OrderSelect(ticket))
+      {
+         if(OrderGetInteger(ORDER_MAGIC) == InpMagicNumber && OrderGetString(ORDER_SYMBOL) == symbol)
+            return true;
+      }
+   }
+
+   return false;
+}
+
+bool HasHistoricalTrade()
+{
+   string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
+   if(!HistorySelect(0, TimeCurrent()))
+      return false;
+
+   int total = HistoryOrdersTotal();
+   for(int i=0; i<total; ++i)
+   {
+      ulong ticket = HistoryOrderGetTicket(i);
+      if(HistoryOrderSelect(ticket))
+      {
+         if(OrderGetInteger(ORDER_MAGIC) == InpMagicNumber && OrderGetString(ORDER_SYMBOL) == symbol)
+            return true;
+      }
+   }
+   return false;
+}
+
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
@@ -222,6 +271,13 @@ int OnInit()
 
    //--- Visual lines (optional)
    UpdateVisualLines();
+
+   //--- If any active or historical trades exist for this magic/symbol, mark as placed to prevent duplicates
+   if(HasActiveTradeOrOrder() || HasHistoricalTrade())
+   {
+      orderPlaced = true;
+      Print("Found existing trade/order/history for this signal. Will not place another.");
+   }
    
    return INIT_SUCCEEDED;
 }
@@ -284,6 +340,13 @@ void OnTick()
       //--- Skip if order already placed (for single-trade mode)
       if(orderPlaced)
          return;
+   }
+
+   //--- Global guard: if any active or historical trade/order exists, do not place again
+   if(HasActiveTradeOrOrder() || HasHistoricalTrade())
+   {
+      orderPlaced = true;
+      return;
    }
    
    Print(">>> Preparing order placement...");
