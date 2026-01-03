@@ -9,7 +9,7 @@
 #property description "Configurable backtesting EA with precise order entry parameters"
 
 #include <Trade\Trade.mqh>
-#include "BacktesterRisk.mqh"
+#include <BacktesterRisk.mqh>
 
 //--- Input Parameters
 input group "=== Order Settings ==="
@@ -77,6 +77,17 @@ int OnInit()
    
    //--- Validate inputs
    if(InpRiskPercent <= 0 || InpRiskPercent > 100)
+   {
+      Print("Error: Risk percent must be between 0 and 100");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+   
+   if(InpStartingBalance <= 0)
+   {
+      Print("Error: Starting balance must be greater than 0");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+   
    //--- Build exact entry time if enabled
    if(InpUseExactTime)
    {
@@ -99,17 +110,28 @@ int OnInit()
       Print("Exact entry time set to: ", TimeToString(exactEntryTime, TIME_DATE|TIME_SECONDS));
    }
    
-   {
-      Print("Error: Risk percent must be between 0 and 100");
-      return INIT_PARAMETERS_INCORRECT;
-   }
+   Print("Backtester-EA initialized successfully");
+   Print("Symbol: ", symbol);
+   Print("Starting Balance: ", InpStartingBalance);
+   Print("Risk per trade: ", InpRiskPercent, "%");
    
-   if(InpStartingBalance <= 0)
-   {
-      Print("Error: Starting balance must be greater than 0");
-      return INIT_PARAMETERS_INCORRECT;
-   }
-   If using exact entry time, check if we've reached it
+   return INIT_SUCCEEDED;
+}
+
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   Print("Backtester-EA stopped. Reason: ", reason);
+}
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   //--- If using exact entry time, check if we've reached it
    if(InpUseExactTime)
    {
       datetime currentTime = TimeCurrent();
@@ -143,29 +165,7 @@ int OnInit()
       //--- Skip if order already placed (for single-trade mode)
       if(orderPlaced)
          return;
-   }--------------------------------------------------------+
-void OnDeinit(const int reason)
-{
-   Print("Backtester-EA stopped. Reason: ", reason);
-}
-
-//+------------------------------------------------------------------+
-//| Expert tick function                                             |
-//+------------------------------------------------------------------+
-void OnTick()
-{
-   //--- Check if we should trade once per bar
-   if(InpTradeOncePerBar)
-   {
-      datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-      if(currentBarTime == lastBarTime)
-         return;
-      lastBarTime = currentBarTime;
    }
-   
-   //--- Skip if order already placed (for single-trade mode)
-   if(orderPlaced)
-      return;
    
    //--- Get symbol info
    string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
