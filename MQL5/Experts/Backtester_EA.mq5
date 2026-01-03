@@ -173,7 +173,13 @@ void OnTick()
          return;
    }
    
-   //--- Get symbol infInpEntryPrice;
+   //--- Get symbol info
+   string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
+   
+   //--- Get current prices
+   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+   double entryPrice = InpEntryPrice;
    
    //--- Calculate lot size based on risk
    double lotSize;
