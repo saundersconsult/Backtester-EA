@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Backtester-EA"
 #property link      ""
-#property version   "1.01"
+#property version   "1.02"
 #property description "Signal validator EA with exact entry time and absolute price levels"
 
 #include <Trade\Trade.mqh>
@@ -195,13 +195,7 @@ void OnTick()
       if(InpStopLossPrice > 0)
       {
          double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-         stopLossDistance = MathAbs(entryPriceRDER_MARKET_BUY || InpOrderType == ORDER_BUY_LIMIT || InpOrderType == ORDER_BUY_STOP) ? ask : bid);
-      double stopLossDistance = 0;
-      
-      if(InpStopLossPrice > 0)
-      {
-         double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-         stopLossDistance = MathAbs(entryPriceForCalc - InpStopLossPrice) / point;
+         stopLossDistance = MathAbs(entryPrice - InpStopLossPrice) / point;
       }
       else
       {
