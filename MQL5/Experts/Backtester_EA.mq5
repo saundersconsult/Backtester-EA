@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Backtester-EA"
 #property link      ""
-#property version   "1.05"
-#property description "Signal validator EA with timezone-based entry time, automatic broker TZ detection, and absolute price levels"
+#property version   "1.07"
+#property description "Signal validator EA with timezone-based entry time, visual lines, and absolute price levels"
 
 #include <Trade\Trade.mqh>
 #include <BacktesterRisk.mqh>
@@ -50,6 +50,12 @@ input int    InpEntryHour = 9;                                 // Entry Hour (0-
 input int    InpEntryMinute = 30;                              // Entry Minute (0-59, in signal timezone)
 input int    InpEntrySecond = 0;                               // Entry Second (0-59, in signal timezone)
 
+input group "=== Visual Validation ==="
+input bool   InpShowVisualLines = false;                       // Show entry/SL/TP lines on chart
+input color  InpEntryLineColor = clrDodgerBlue;                // Entry line color
+input color  InpTakeProfitLineColor = clrLimeGreen;            // Take Profit line color
+input color  InpStopLossLineColor = clrRed;                    // Stop Loss line color
+
 //--- Global Variables
 CTrade trade;
 CBacktesterRisk riskCalc;
@@ -58,6 +64,50 @@ bool orderPlaced = false;
 datetime exactEntryTime = 0;
 bool exactTimeReached = false;
 int brokerUTCOffsetSeconds = 0;  // Broker's UTC offset in seconds
+string linePrefix = "";         // Prefix for visual objects
+
+//--- Helpers for visual lines
+void DrawOrUpdateLine(const string name, const double price, const color lineColor)
+{
+   if(price <= 0)
+   {
+      ObjectDelete(0, name);
+      return;
+   }
+
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
+   }
+
+   ObjectSetDouble(0, name, OBJPROP_PRICE, price);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, lineColor);
+   ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+}
+
+void RemoveVisualLines()
+{
+   ObjectDelete(0, linePrefix + "Entry");
+   ObjectDelete(0, linePrefix + "TP");
+   ObjectDelete(0, linePrefix + "SL");
+}
+
+void UpdateVisualLines()
+{
+   if(!InpShowVisualLines)
+   {
+      RemoveVisualLines();
+      return;
+   }
+
+   DrawOrUpdateLine(linePrefix + "Entry", InpEntryPrice, InpEntryLineColor);
+   DrawOrUpdateLine(linePrefix + "TP", InpTakeProfitPrice, InpTakeProfitLineColor);
+   DrawOrUpdateLine(linePrefix + "SL", InpStopLossPrice, InpStopLossLineColor);
+}
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -68,6 +118,9 @@ int OnInit()
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFilling(ORDER_FILLING_FOK);
+
+   //--- Set visual object prefix
+   linePrefix = StringFormat("BTEA_%d_", InpMagicNumber);
    
    //--- Detect broker's UTC offset
    datetime serverTime = TimeCurrent();   // Server time in broker timezone
@@ -142,6 +195,9 @@ int OnInit()
       Print("Stop Loss: ", InpStopLossPrice);
    if(InpTakeProfitPrice > 0)
       Print("Take Profit: ", InpTakeProfitPrice);
+
+   //--- Visual lines (optional)
+   UpdateVisualLines();
    
    return INIT_SUCCEEDED;
 }
@@ -151,6 +207,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+   RemoveVisualLines();
    Print("Backtester-EA stopped. Reason: ", reason);
 }
 
