@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Backtester-EA"
 #property link      ""
-#property version   "1.00"
-#property description "Configurable backtesting EA with precise order entry parameters"
+#property version   "1.01"
+#property description "Signal validator EA with exact entry time and absolute price levels"
 
 #include <Trade\Trade.mqh>
 #include <BacktesterRisk.mqh>
@@ -25,8 +25,8 @@ enum ENUM_ORDER_TYPE_CUSTOM
 
 input ENUM_ORDER_TYPE_CUSTOM InpOrderType = ORDER_MARKET_BUY;  // Order Type
 input double InpEntryPrice = 0.0;                               // Entry Price (0=Market)
-input double InpStopLossPoints = 50.0;                         // Stop Loss (points)
-input double InpTakeProfitPoints = 100.0;                      // Take Profit (points)
+input double InpStopLossPrice = 0.0;                           // Stop Loss Price (0=None)
+input double InpTakeProfitPrice = 0.0;                         // Take Profit Price (0=None)
 
 input group "=== Risk Management ==="
 input double InpRiskPercent = 1.0;                             // Risk Per Trade (%)
@@ -114,6 +114,10 @@ int OnInit()
    Print("Symbol: ", symbol);
    Print("Starting Balance: ", InpStartingBalance);
    Print("Risk per trade: ", InpRiskPercent, "%");
+   if(InpStopLossPrice > 0)
+      Print("Stop Loss: ", InpStopLossPrice);
+   if(InpTakeProfitPrice > 0)
+      Print("Take Profit: ", InpTakeProfitPrice);
    
    return INIT_SUCCEEDED;
 }
@@ -170,6 +174,11 @@ void OnTick()
    //--- Get symbol info
    string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
    
+   //--- Get current prices
+   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+   double entryPrice = (InpEntryPrice > 0) ? InpEntryPrice : 0;
+   
    //--- Calculate lot size based on risk
    double lotSize;
    if(InpUseFixedLotSize)
@@ -178,17 +187,34 @@ void OnTick()
    }
    else
    {
-      lotSize = riskCalc.CalculateLotSize(InpRiskPercent, InpStopLossPoints);
+      // Calculate stop loss distance in points for risk calculation
+      double entryPriceForCalc = (InpEntryPrice > 0) ? InpEntryPrice : 
+                                  ((InpOrderType == ORDER_MARKET_BUY || InpOrderType == ORDER_BUY_LIMIT || InpOrderType == ORDER_BUY_STOP) ? ask : bid);
+      double stopLossDistance = 0;
+      
+      if(InpStopLossPrice > 0)
+      {
+         double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+         stopLossDistance = MathAbs(entryPriceForCalc - InpStopLossPrice) / point;
+      }
+      else
+      {
+         stopLossDistance = 50; // Default if no SL specified
+      }
+      
+      lotSize = riskCalc.CalculateLotSize(InpRiskPercent, stopLossDistance);
    }
    
-   //--- Get current prices
-   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
-   double entryPrice = (InpEntryPrice > 0) ? InpEntryPrice : 0;
+   //--- Use absolute SL and TP prices
+   double stopLoss = InpStopLossPrice;
+   double takeProfit = InpTakeProfitPrice;
    
-   //--- Calculate SL and TP
-   double stopLoss = 0, takeProfit = 0;
-   CalculateStopLevels(InpOrderType, entryPrice, stopLoss, takeProfit);
+   //--- Normalize prices
+   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   if(stopLoss > 0)
+      stopLoss = NormalizeDouble(stopLoss, digits);
+   if(takeProfit > 0)
+      takeProfit = NormalizeDouble(takeProfit, digits);
    
    //--- Place order based on type
    bool result = false;
@@ -227,14 +253,14 @@ void OnTick()
    {
       datetime entryTime = TimeCurrent();
       Print("========================================");
-      Print("Order placed successfully!");
+      Print("SIGNAL VALIDATED - Order Placed");
       Print("Entry Time: ", TimeToString(entryTime, TIME_DATE|TIME_SECONDS));
       Print("Symbol: ", symbol);
       Print("Order Type: ", EnumToString(InpOrderType));
       Print("Lot Size: ", lotSize);
       Print("Entry Price: ", (entryPrice > 0 ? entryPrice : (InpOrderType == ORDER_MARKET_BUY ? ask : bid)));
-      Print("Stop Loss: ", stopLoss);
-      Print("Take Profit: ", takeProfit);
+      Print("Stop Loss: ", (stopLoss > 0 ? DoubleToString(stopLoss, digits) : "None"));
+      Print("Take Profit: ", (takeProfit > 0 ? DoubleToString(takeProfit, digits) : "None"));
       Print("========================================");
       orderPlaced = true;
    }
@@ -242,39 +268,5 @@ void OnTick()
    {
       Print("Order failed. Error: ", GetLastError(), " - ", trade.ResultRetcodeDescription());
    }
-}
-
-//+------------------------------------------------------------------+
-//| Calculate stop loss and take profit levels                       |
-//+------------------------------------------------------------------+
-void CalculateStopLevels(ENUM_ORDER_TYPE_CUSTOM orderType, double entryPrice, double &sl, double &tp)
-{
-   string symbol = (InpSymbol == "") ? _Symbol : InpSymbol;
-   double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
-   
-   //--- Use entry price or current price
-   double basePrice = (entryPrice > 0) ? entryPrice : 
-                      ((orderType == ORDER_MARKET_BUY || orderType == ORDER_BUY_LIMIT || orderType == ORDER_BUY_STOP) ? ask : bid);
-   
-   //--- Calculate SL and TP based on order type
-   if(orderType == ORDER_MARKET_BUY || orderType == ORDER_BUY_LIMIT || orderType == ORDER_BUY_STOP)
-   {
-      // Buy orders
-      sl = (InpStopLossPoints > 0) ? basePrice - (InpStopLossPoints * point) : 0;
-      tp = (InpTakeProfitPoints > 0) ? basePrice + (InpTakeProfitPoints * point) : 0;
-   }
-   else
-   {
-      // Sell orders
-      sl = (InpStopLossPoints > 0) ? basePrice + (InpStopLossPoints * point) : 0;
-      tp = (InpTakeProfitPoints > 0) ? basePrice - (InpTakeProfitPoints * point) : 0;
-   }
-   
-   //--- Normalize prices
-   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-   sl = NormalizeDouble(sl, digits);
-   tp = NormalizeDouble(tp, digits);
 }
 //+------------------------------------------------------------------+
